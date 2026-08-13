@@ -58,23 +58,85 @@ if($env:PROCESSOR_ARCHITECTURE -ne $arch)
     }
 }
 
-# Setup vcpkg
+# Setup vcpkg - Fixed to handle missing 'main' branch
 Write-Output "Configuring vcpkg..."
 cd "$(Split-Path -Parent $MyInvocation.MyCommand.Path)\.."
-# Use the latest main branch of vcpkg so we pick up updated ports and downloads
-git clone https://github.com/microsoft/vcpkg -b main
-cd vcpkg
+
+# Clone vcpkg (do not assume a branch name). Then detect remote HEAD branch and checkout it.
+if (-not (Test-Path .\vcpkg)) {
+    Write-Output "Cloning vcpkg from https://github.com/microsoft/vcpkg"
+    git clone https://github.com/microsoft/vcpkg
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "git clone of vcpkg failed with exit code $LASTEXITCODE"
+        exit 1
+    }
+    cd vcpkg
+
+    # Determine the default remote branch (HEAD branch)
+    try {
+        Write-Output "Detecting default remote branch..."
+        $remoteInfo = git remote show origin 2>$null
+        $headLine = ($remoteInfo | Select-String 'HEAD branch:' -SimpleMatch).ToString()
+        if ($headLine) {
+            $defaultBranch = $headLine.Split(':')[-1].Trim()
+            Write-Output "Detected remote default branch: $defaultBranch"
+            git checkout $defaultBranch
+            if ($LASTEXITCODE -eq 0) {
+                Write-Output "Successfully checked out $defaultBranch"
+            } else {
+                Write-Output "Checkout of $defaultBranch failed; continuing on cloned default branch."
+            }
+        } else {
+            Write-Output "Could not detect remote HEAD branch; using cloned default branch."
+        }
+    } catch {
+        Write-Output "Warning: could not determine remote default branch: $_"
+    }
+} else {
+    Write-Output "vcpkg already exists, skipping clone."
+    cd vcpkg
+    Write-Output "Fetching latest updates..."
+    git fetch --all
+    if ($LASTEXITCODE -eq 0) {
+        git pull --ff-only
+        if ($LASTEXITCODE -ne 0) {
+            Write-Output "vcpkg pull failed or no updates"
+        } else {
+            Write-Output "vcpkg updated successfully"
+        }
+    } else {
+        Write-Output "vcpkg fetch failed, continuing with existing version"
+    }
+}
+
+# Bootstrap vcpkg
+Write-Output "Bootstrapping vcpkg..."
 .\bootstrap-vcpkg.bat
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "vcpkg bootstrap failed with exit code $LASTEXITCODE"
+    exit 1
+}
 
 # Core packages. libxml2 is for libiio
+Write-Output "Installing core vcpkg packages..."
 .\vcpkg install --triplet $platform pthreads libjpeg-turbo tiff libpng glfw3 libusb fftw3 libxml2 portaudio nng zstd armadillo opencl curl[schannel] hdf5[cpp] sqlite3
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "vcpkg core packages installation failed with exit code $LASTEXITCODE"
+    exit 1
+}
 
 # Entirely for UHD...
+Write-Output "Installing Boost packages for UHD..."
 .\vcpkg install --triplet $platform boost-chrono boost-date-time boost-filesystem boost-program-options boost-system boost-serialization boost-thread `
                                     boost-test boost-format boost-asio boost-math boost-graph boost-units boost-lockfree boost-circular-buffer        `
                                     boost-assign boost-dll
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "vcpkg Boost packages installation failed with exit code $LASTEXITCODE"
+    exit 1
+}
 
-# Start Building Dependencies
+#Start Building Dependencies
+Write-Output "Building custom dependencies..."
 $null = mkdir build
 cd build
 $build_args = @("-DCMAKE_TOOLCHAIN_FILE=$($(Get-Item ..\scripts\buildsystems\vcpkg.cmake).FullName)", "-DVCPKG_TARGET_TRIPLET=$platform", "-DCMAKE_INSTALL_PREFIX=$($(Get-Item ..\installed\$platform).FullName)")
@@ -88,9 +150,9 @@ if($env:PROCESSOR_ARCHITECTURE -ne $arch)
     $build_args += "-DCMAKE_SYSTEM_NAME=Windows", "-DCMAKE_SYSTEM_PROCESSOR=$arch", "-DCMAKE_CROSSCOMPILING=ON", "-DVCPKG_USE_HOST_TOOLS=ON", "-DVCPKG_HOST_TRIPLET=$host_triplet"
 }
 
-# TEMPORARY: Use an unmerged PR of LibUSB to allow setting RAW_IO on USB transfers. This is needed to
-#            prevent sample drops on some Windows machines with USB SDRs
-#            Update Jan. 30, 2025: There's nothing more permanent than a temporary measure :-)
+#TEMPORARY: Use an unmerged PR of LibUSB to allow setting RAW_IO on USB transfers. This is needed to
+#           prevent sample drops on some Windows machines with USB SDRs
+#           Update Jan. 30, 2025: There's nothing more permanent than a temporary measure :-)
 Write-Output "Building libusb..."
 git clone https://github.com/HannesFranke-smartoptics/libusb -b raw_io_v2
 cd libusb\msvc
@@ -120,8 +182,8 @@ cd ..\..
 rm -recurse -force cpu_features
 
 Write-Output "Building Volk..."
-# git clone https://github.com/gnuradio/volk --depth 1 -b v3.1.2
-git clone https://github.com/JVital2013/volk --depth 1 -b win-arm64 # Patches to fix NEON support on Windows
+#git clone https://github.com/gnuradio/volk --depth 1 -b v3.1.2
+git clone https://github.com/JVital2013/volk --depth 1 -b win-arm64 #Patches to fix NEON support on Windows
 cd volk
 $null = mkdir build
 cd build
@@ -132,8 +194,8 @@ cd ..\..
 rm -recurse -force volk
 
 Write-Output "Building Airspy..."
-# git clone https://github.com/airspy/airspyone_host --depth 1 #-b v1.0.10
-git clone https://github.com/JVital2013/airspyone_host -b rawio # Enables RAW_IO to avoid sample drops
+#git clone https://github.com/airspy/airspyone_host --depth 1 #-b v1.0.10
+git clone https://github.com/JVital2013/airspyone_host -b rawio #Enables RAW_IO to avoid sample drops
 cd airspyone_host\libairspy
 $null = mkdir build
 cd build
@@ -144,8 +206,8 @@ cd ..\..\..
 rm -recurse -force airspyone_host
 
 Write-Output "Building Airspy HF..."
-# git clone https://github.com/airspy/airspyhf --depth 1 #-b 1.6.8
-git clone https://github.com/JVital2013/airspyhf -b rawio # Enables RAW_IO to avoid sample drops
+#git clone https://github.com/airspy/airspyhf --depth 1 #-b 1.6.8
+git clone https://github.com/JVital2013/airspyhf -b rawio #Enables RAW_IO to avoid sample drops
 cd airspyhf\libairspyhf
 $null = mkdir build
 cd build
@@ -156,8 +218,8 @@ cd ..\..\..
 rm -recurse -force airspyhf
 
 Write-Output "Building RTL-SDR..."
-# git clone https://github.com/osmocom/rtl-sdr --depth 1 -b v2.0.2
-git clone https://github.com/JVital2013/librtlsdr -b rawio # Enables RAW_IO to avoid sample drops
+#git clone https://github.com/osmocom/rtl-sdr --depth 1 -b v2.0.2
+git clone https://github.com/JVital2013/librtlsdr -b rawio #Enables RAW_IO to avoid sample drops
 cd librtlsdr
 $null = mkdir build
 cd build
@@ -168,8 +230,8 @@ cd ..\..
 rm -recurse -force librtlsdr
 
 Write-Output "Building HackRF..."
-# git clone https://github.com/greatscottgadgets/hackrf --depth 1 -b v2024.02.1
-git clone https://github.com/JVital2013/hackrf -b rawio # Enables RAW_IO to avoid sample drops
+#git clone https://github.com/greatscottgadgets/hackrf --depth 1 -b v2024.02.1
+git clone https://github.com/JVital2013/hackrf -b rawio #Enables RAW_IO to avoid sample drops
 cd hackrf\host\libhackrf
 $null = mkdir build
 cd build
@@ -180,7 +242,7 @@ cd ..\..\..\..
 rm -recurse -force hackrf
 
 Write-Output "Building HydraSDR..."
-git clone https://github.com/hydrasdr/rfone_host -b v1.0.1 # TODO: Patch for Raw IO support to avoid sample drops?
+git clone https://github.com/hydrasdr/rfone_host -b v1.0.1 #TODO: Patch for Raw IO support to avoid sample drops?
 cd rfone_host\libhydrasdr
 $null = mkdir build
 cd build
@@ -191,7 +253,7 @@ cd ..\..\..
 rm -recurse -force rfone_host
 
 Write-Output "Building FobosSDR..."
-git clone https://github.com/rigexpert/libfobos -b v.2.2.2 # TODO: Patch for Raw IO support to avoid sample drops?
+git clone https://github.com/rigexpert/libfobos -b v.2.2.2 #TODO: Patch for Raw IO support to avoid sample drops?
 cd libfobos
 
 # FobosSDR wants us to load libusb into its directory, and install udev rules to the root of the drive.
@@ -211,7 +273,7 @@ rm -recurse -force libfobos
 Write-Output "Building libiio..."
 git clone https://github.com/analogdevicesinc/libiio --depth 1 -b v0.26
 cd libiio
-(Get-Content -raw CMakeLists.txt) -replace "check_symbol_exists\(libusb_get_version libusb.h HAS_LIBUSB_GETVERSION\)", "" | Set-Content -Encoding ASCII CMakeLists.txt # Needed for cross-compilation
+(Get-Content -raw CMakeLists.txt) -replace "check_symbol_exists\(libusb_get_version libusb.h HAS_LIBUSB_GETVERSION\)", "" | Set-Content -Encoding ASCII CMakeLists.txt #Needed for cross-compilation
 $null = mkdir build
 cd build
 cmake $build_args -DWITH_IIOD=OFF -DWITH_TESTS=OFF -DWITH_ZSTD=ON -DLIBUSB_INCLUDE_DIR="$($libusb_include)" -DLIBUSB_LIBRARIES="$($libusb_lib)" ..
@@ -283,7 +345,8 @@ rm -recurse -force uhd
 cd ..
 rm -recurse -force build
 
-# Install SDRPlay API
+#Install SDRPlay API
+Write-Output "Installing SDRPlay API..."
 Invoke-WebRequest -Uri "https://www.satdump.org/SDRPlay.zip" -OutFile sdrplay.zip
 mkdir sdrplay | Out-Null
 Expand-Archive sdrplay.zip .
@@ -293,8 +356,10 @@ cp sdrplay\API\$sdrplay_arch\sdrplay_api.lib installed\$platform\lib
 Remove-Item sdrplay -Force -Recurse -ErrorAction SilentlyContinue
 Remove-Item sdrplay.zip
 
-# Clean Up (Some packages are silly)
+#Clean Up (Some packages are silly)
+Write-Output "Cleaning up..."
 mv installed\$platform\lib\*.dll installed\$platform\bin\
 mv installed\$platform\bin\*.lib installed\$platform\lib\
 
+Write-Output "Configuration complete!"
 cd ..
