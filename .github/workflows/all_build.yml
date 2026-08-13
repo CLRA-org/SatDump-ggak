@@ -1,298 +1,510 @@
-param([string]$platform="x64-windows") #or x86-windows, arm64-windows
-$ErrorActionPreference = "Stop"
-$PSDefaultParameterValues['*:ErrorAction']='Stop'
+name: Build All
 
-if(!!(Get-Command 'tf' -ErrorAction SilentlyContinue) -eq $false -and $Env:GITHUB_WORKSPACE -eq $null)
-{
-    Write-Error "You must run this script within Developer Powershell for Visual Studio"
-    exit 1
-}
-if(Test-Path "$(Split-Path -Parent $MyInvocation.MyCommand.Path)\..\vcpkg" -ErrorAction SilentlyContinue)
-{
-    Write-Output "$(Split-Path -Parent $MyInvocation.MyCommand.Path)\..\vcpkg already found! Not setting up."
-    exit 1
-}
+on: [push]
 
-if($platform -eq "x64-windows")
-{
-    $generator = "x64"
-    $arch = "AMD64"
-    $sdrplay_arch = "x64"
-}
-elseif($platform -eq "x86-windows")
-{
-    $generator = "Win32"
-    $arch = "X86"
-    $sdrplay_arch = "x86"
-}
-elseif($platform -eq "arm64-windows")
-{
-    $generator = "ARM64"
-    $arch = "ARM64"
-    $sdrplay_arch = "arm64"
-}
-else
-{
-    Write-Error "Unsupported platform: $platform"
-    exit 1
-}
+env:
+  # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
+  BUILD_TYPE: Release
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-if($env:PROCESSOR_ARCHITECTURE -ne $arch)
-{
-    if($env:PROCESSOR_ARCHITECTURE -eq "AMD64")
-    {
-        $host_triplet = "x64-windows"
-    }
-    elseif($env:PROCESSOR_ARCHITECTURE -eq "X86")
-    {
-        $host_triplet = "x86-windows"
-    }
-    elseif($env:PROCESSOR_ARCHITECTURE -eq "ARM64")
-    {
-        $host_triplet = "arm64-windows"
-    }
-    else
-    {
-        Write-Error "Unsupported host platform: $($env:PROCESSOR_ARCHITECTURE)"
-        exit 1
-    }
-}
+permissions:
+  contents: write
 
-#Setup vcpkg
-Write-Output "Configuring vcpkg..."
-cd "$(Split-Path -Parent $MyInvocation.MyCommand.Path)\.."
-# Use the latest main branch of vcpkg so we pick up updated ports and downloads
-git clone https://github.com/microsoft/vcpkg -b main
-cd vcpkg
-.\bootstrap-vcpkg.bat
+jobs:
+  build_windows_x64:
+    runs-on: windows-2022
 
-# Core packages. libxml2 is for libiio
-.\vcpkg install --triplet $platform pthreads libjpeg-turbo tiff libpng glfw3 libusb fftw3 libxml2 portaudio nng zstd armadillo opencl curl[schannel] hdf5[cpp] sqlite3
+    steps:
+      - uses: actions/checkout@v4
 
-# Entirely for UHD...
-.\vcpkg install --triplet $platform boost-chrono boost-date-time boost-filesystem boost-program-options boost-system boost-serialization boost-thread `
-                                    boost-test boost-format boost-asio boost-math boost-graph boost-units boost-lockfree boost-circular-buffer        `
-                                    boost-assign boost-dll
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        id: win-deps-x64
+        with:
+          path: vcpkg
+          key: win-deps-x64-${{ hashFiles('windows/Configure-vcpkg.ps1') }}
 
-#Start Building Dependencies
-$null = mkdir build
-cd build
-$build_args="-DCMAKE_TOOLCHAIN_FILE=$($(Get-Item ..\scripts\buildsystems\vcpkg.cmake).FullName)", "-DVCPKG_TARGET_TRIPLET=$platform", "-DCMAKE_INSTALL_PREFIX=$($(Get-Item ..\installed\$platform).F[...]
-$standard_include=$(Get-Item ..\installed\$platform\include).FullName
-$standard_lib=$(Get-Item ..\installed\$platform\lib).FullName
-$pthread_lib=$(Get-Item ..\installed\$platform\lib\pthreadVC3.lib).FullName
-$libusb_include=$(Get-Item ..\installed\$platform\include\libusb-1.0).FullName
-$libusb_lib=$(Get-Item ..\installed\$platform\lib\libusb-1.0.lib).FullName
-if($env:PROCESSOR_ARCHITECTURE -ne $arch)
-{
-    $build_args += "-DCMAKE_SYSTEM_NAME=Windows", "-DCMAKE_SYSTEM_PROCESSOR=$arch", "-DCMAKE_CROSSCOMPILING=ON", "-DVCPKG_USE_HOST_TOOLS=ON", "-DVCPKG_HOST_TRIPLET=$host_triplet"
-}
-#TEMPORARY: Use an unmerged PR of LibUSB to allow setting RAW_IO on USB transferrs. This is needed to
-#           prevent sample drops on some Windows machines with USB SDRs
-#           Update Jan. 30, 2025: There's nothing more permanent than a temporary measure :-)
-Write-Output "Building libusb..."
-git clone https://github.com/HannesFranke-smartoptics/libusb -b raw_io_v2
-cd libusb\msvc
-(Get-Content -raw Base.props) -replace "<TreatWarningAsError>true</TreatWarningAsError>", "<TreatWarningAsError>false</TreatWarningAsError>" | Set-Content -Encoding ASCII Base.props
-msbuild -m -v:m -p:Platform=$generator,Configuration=Release .\libusb.sln
-msbuild -m -v:m -p:Platform=$generator,Configuration=Debug .\libusb.sln
-$toolset_used=$(get-childitem ..\build\)[0].Name
-cp -Force ..\build\$toolset_used\$generator\Release\dll\libusb-1.0.dll ..\..\..\installed\$platform\bin
-cp -Force ..\build\$toolset_used\$generator\Release\dll\libusb-1.0.pdb ..\..\..\installed\$platform\bin
-cp -Force ..\build\$toolset_used\$generator\Release\dll\libusb-1.0.lib ..\..\..\installed\$platform\lib
-cp -Force ..\build\$toolset_used\$generator\Debug\dll\libusb-1.0.dll ..\..\..\installed\$platform\Debug\bin
-cp -Force ..\build\$toolset_used\$generator\Debug\dll\libusb-1.0.pdb ..\..\..\installed\$platform\Debug\bin
-cp -Force ..\build\$toolset_used\$generator\Debug\dll\libusb-1.0.lib ..\..\..\installed\$platform\Debug\lib
-cp -force ..\libusb\libusb.h ..\..\..\installed\$platform\include
-cd ..\..
-rm -recurse -force libusb
+      - name: Set up Python 3.13
+        if: steps.win-deps-x64.outputs.cache-hit != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.13
 
-Write-Output "Building cpu_features..."
-git clone https://github.com/google/cpu_features -b v0.10.1
-cd cpu_features
-$null = mkdir build
-cd build
-cmake $build_args -DBUILD_TESTING=OFF -DBUILD_EXECUTABLE=OFF ..
-cmake --build . --config Release
-cmake --install .
-cd ..\..
-rm -recurse -force cpu_features
+      - name: Install mako
+        if: steps.win-deps-x64.outputs.cache-hit != 'true'
+        run: pip install mako
 
-Write-Output "Building Volk..."
-#git clone https://github.com/gnuradio/volk --depth 1 -b v3.1.2
-git clone https://github.com/JVital2013/volk --depth 1 -b win-arm64 #Patches to fix NEON support on Windows
-cd volk
-$null = mkdir build
-cd build
-cmake $build_args -DENABLE_TESTING=OFF -DENABLE_MODTOOL=OFF ..
-cmake --build . --config Release
-cmake --install .
-cd ..\..
-rm -recurse -force volk
+      - name: Add msbuild to PATH
+        if: steps.win-deps-x64.outputs.cache-hit != 'true'
+        uses: microsoft/setup-msbuild@v2
 
-Write-Output "Building Airspy..."
-#git clone https://github.com/airspy/airspyone_host --depth 1 #-b v1.0.10
-git clone https://github.com/JVital2013/airspyone_host -b rawio #Enables RAW_IO to avoid sample drops
-cd airspyone_host\libairspy
-$null = mkdir build
-cd build
-cmake $build_args -DLIBUSB_INCLUDE_DIR="$($libusb_include)" -DLIBUSB_LIBRARIES="$($libusb_lib)" -DTHREADS_PTHREADS_WIN32_LIBRARY="$($pthread_lib)" ..
-cmake --build . --config Release
-cmake --install .
-cd ..\..\..
-rm -recurse -force airspyone_host
+      - name: Update vcpkg
+        if: steps.win-deps-x64.outputs.cache-hit == 'true'
+        shell: powershell
+        run: |
+          cd ${{github.workspace}}/vcpkg
+          git pull
+          .\vcpkg update
 
-Write-Output "Building Airspy HF..."
-#git clone https://github.com/airspy/airspyhf --depth 1 #-b 1.6.8
-git clone https://github.com/JVital2013/airspyhf -b rawio #Enables RAW_IO to avoid sample drops
-cd airspyhf\libairspyhf
-$null = mkdir build
-cd build
-cmake $build_args -DLIBUSB_INCLUDE_DIR="$($libusb_include)" -DLIBUSB_LIBRARIES="$($libusb_lib)" -DTHREADS_PTHREADS_WIN32_LIBRARY="$($pthread_lib)" ..
-cmake --build . --config Release
-cmake --install .
-cd ..\..\..
-rm -recurse -force airspyhf
+      - name: Configure vcpkg
+        if: steps.win-deps-x64.outputs.cache-hit != 'true'
+        shell: powershell
+        run: ${{github.workspace}}\windows\Configure-vcpkg.ps1 -platform x64-windows
 
-Write-Output "Building RTL-SDR..."
-#git clone https://github.com/osmocom/rtl-sdr --depth 1 -b v2.0.2
-git clone https://github.com/JVital2013/librtlsdr -b rawio #Enables RAW_IO to avoid sample drops
-cd librtlsdr
-$null = mkdir build
-cd build
-cmake $build_args -DLIBUSB_INCLUDE_DIRS="$($libusb_include)" -DLIBUSB_LIBRARIES="$($libusb_lib)" -DTHREADS_PTHREADS_INCLUDE_DIR="$($standard_include)" -DTHREADS_PTHREADS_LIBRARY="$($pthread_lib)"[...]
-cmake --build . --config Release
-cmake --install .
-cd ..\..
-rm -recurse -force librtlsdr
+      - name: Clean up vcpkg
+        if: steps.win-deps-x64.outputs.cache-hit != 'true'
+        run: rm -recurse -force $Env:GITHUB_WORKSPACE/vcpkg/packages, $Env:GITHUB_WORKSPACE/vcpkg/downloads, $Env:GITHUB_WORKSPACE/vcpkg/buildtrees
 
-Write-Output "Building HackRF..."
-#git clone https://github.com/greatscottgadgets/hackrf --depth 1 -b v2024.02.1
-git clone https://github.com/JVital2013/hackrf -b rawio #Enables RAW_IO to avoid sample drops
-cd hackrf\host\libhackrf
-$null = mkdir build
-cd build
-cmake $build_args -DLIBUSB_INCLUDE_DIR="$($libusb_include)" -DLIBUSB_LIBRARIES="$($libusb_lib)" -DTHREADS_PTHREADS_WIN32_LIBRARY="$($pthread_lib)" ..
-cmake --build . --config Release
-cmake --install .
-cd ..\..\..\..
-rm -recurse -force hackrf
+      - name: Download Aaronia RTSA API
+        if: steps.win-deps-x64.outputs.cache-hit != 'true'
+        shell: powershell
+        run: Invoke-WebRequest -Uri "https://www.satdump.org/Aaronia_RTSA_Suite_PRO_2.2.0.12821_Setup_64bit.exe" -OutFile $Env:GITHUB_WORKSPACE/vcpkg/rtsa.exe
 
-Write-Output "Building HydraSDR..."
-git clone https://github.com/hydrasdr/rfone_host -b v1.0.1 #TODO: Patch for Raw IO support to avoid sample drops?
-cd rfone_host\libhydrasdr
-$null = mkdir build
-cd build
-cmake $build_args -DLIBUSB_INCLUDE_DIR="$($libusb_include)" -DLIBUSB_LIBRARIES="$($libusb_lib)" -DTHREADS_PTHREADS_WIN32_LIBRARY="$($pthread_lib)" ..
-cmake --build . --config Release
-cmake --install .
-cd ..\..\..
-rm -recurse -force rfone_host
+      - name: Install Aaronia RTSA API
+        shell: cmd
+        run: start /wait vcpkg\rtsa.exe /q2 /install
 
-Write-Output "Building FobosSDR..."
-git clone https://github.com/rigexpert/libfobos -b v.2.2.2 #TODO: Patch for Raw IO support to avoid sample drops?
-cd libfobos
+      - name: Add support to NSIS for long PATHs
+        shell: powershell
+        run: ${{github.workspace}}\windows\Get-NSIS-LongStrings.ps1
 
-# FobosSDR wants us to load libusb into its directory, and install udev rules to the root of the drive.
-# We want it to share libusb, with no udev. Patches herein to make it play ball
-(Get-Content -raw CMakeLists.txt) -replace "(?ms)find_package\(PkgConfig\).*message\(FATAL_ERROR `"LibUSB 1.0 required`"\)`r`nendif\(\)", "" | Set-Content -Encoding ASCII CMakeLists.txt
-(Get-Content -raw CMakeLists.txt) -replace "(?ms)ADD_CUSTOM_COMMAND.*Release\r\n\)", "" | Set-Content -Encoding ASCII CMakeLists.txt
-(Get-Content -raw CMakeLists.txt) -replace "(?ms)install\(.*`"udev`"`r`n    \)", "" | Set-Content -Encoding ASCII CMakeLists.txt
+      - name: Create Build Environment
+        run: cmake -E make_directory ${{runner.workspace}}/build
 
-$null = mkdir build
-cd build
-cmake $build_args -DLIBUSB_INCLUDE_DIRS="$($standard_include)" -DLIBUSB_LIBRARIES="$($(Get-Item $libusb_lib).Directory.FullName)" -DCMAKE_INSTALL_LIBDIR="$($standard_lib)" ..
-cmake --build . --config Release
-cmake --install .
-cd ..\..
-rm -recurse -force libfobos
+      - name: Verify vcpkg installed libs (pthread)
+        shell: powershell
+        run: |
+          $libPath = Join-Path $Env:GITHUB_WORKSPACE "vcpkg\installed\x64-windows\lib\pthreadVC3.lib"
+          Write-Host "Checking for pthreadVC3.lib at $libPath"
+          if (-not (Test-Path $libPath)) {
+            Write-Host "ERROR: pthreadVC3.lib not found. Listing vcpkg installed tree for diagnosis..."
+            Get-ChildItem -Path (Join-Path $Env:GITHUB_WORKSPACE 'vcpkg\installed') -Recurse -Force | Select-Object FullName | ForEach-Object { Write-Host $_.FullName }
+            Write-Host "`nIf vcpkg aborted earlier then openblas or msys2 runtime probably failed to build/download. Ensure vcpkg ports are up-to-date (use main branch)."
+            exit 1
+          } else {
+            Write-Host "Found pthreadVC3.lib"
+          }
 
-Write-Output "Building libiio..."
-git clone https://github.com/analogdevicesinc/libiio --depth 1 -b v0.26
-cd libiio
-(Get-Content -raw CMakeLists.txt) -replace "check_symbol_exists\(libusb_get_version libusb.h HAS_LIBUSB_GETVERSION\)", "" | Set-Content -Encoding ASCII CMakeLists.txt #Needed for cross-compilatio[...]
-$null = mkdir build
-cd build
-cmake $build_args -DWITH_IIOD=OFF -DWITH_TESTS=OFF -DWITH_ZSTD=ON -DLIBUSB_INCLUDE_DIR="$($libusb_include)" -DLIBUSB_LIBRARIES="$($libusb_lib)" ..
-cmake --build . --config Release
-cmake --install .
-cd ..\..
-rm -recurse -force libiio
+      - name: Configure CMake
+        working-directory: ${{runner.workspace}}/build
+        run: cmake -DVCPKG_TARGET_TRIPLET="x64-windows" -DPLUGIN_AARONIA_SDR_SUPPORT=ON -DBUILD_MSVC=ON -DCMAKE_TOOLCHAIN_FILE="${{github.workspace}}\vcpkg\scripts\buildsystems\vcpkg.cmake" "$Env:[...]"
 
-Write-Output "Building libad9361-iio..."
-git clone https://github.com/analogdevicesinc/libad9361-iio --depth 1 -b v0.3
-cd libad9361-iio
-$null = mkdir build
-cd build
-cmake $build_args -DLIBIIO_LIBRARIES="$($(Get-Item ..\..\..\installed\$platform\lib\libiio.lib).FullName)" -DENABLE_PACKAGING=OFF ..
-cmake --build . --config Release
-cmake --install .
-cd ..\..
-rm -recurse -force libad9361-iio
+      - name: Build
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: cmake --build . --config $BUILD_TYPE
 
-# Not compatible with ARM at this time
-if($platform -eq "x64-windows" -or $platform -eq "x86-windows")
-{
-    Write-Output "Building LimeSuite..."
-    Invoke-WebRequest -Uri "https://www.satdump.org/FX3-SDK.zip" -OutFile FX3-SDK.zip
-    Expand-Archive FX3-SDK.zip .
-    $fx3_arg = "-DFX3_SDK_PATH=$($(Get-Item .\FX3-SDK).FullName)"
-    git clone https://github.com/myriadrf/LimeSuite # v23.11.0 (latest as of this writing) is not compatible with the latest MSVC
-    cd LimeSuite
-    $null = mkdir build-dir
-    cd build-dir
-    cmake $build_args -DENABLE_GUI=OFF $fx3_arg ..
-    cmake --build . --config Release
-    cmake --install .
-    cd ..\..
-    rm -recurse -force LimeSuite
-}
+      - name: Build Installer
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: cpack -C $BUILD_TYPE
 
-Write-Output "Building bladeRF..."
-git clone https://github.com/Nuand/bladeRF --depth 1 -b 2024.05
-cd bladeRF\host
-Clear-Content cmake/modules/FindLibPThreadsWin32.cmake
-Clear-Content cmake/modules/FindLibUSB.cmake
-(Get-Content -raw CMakeLists.txt) -replace "(?ms)find_package\(LibPThreadsWin32\).*endif\(LIBUSB_FOUND\)", "" | Set-Content -Encoding ASCII CMakeLists.txt
-$null = mkdir build
-cd build
-cmake $build_args $fx3_arg -DTREAT_WARNINGS_AS_ERRORS=OFF -DLIBPTHREADSWIN32_INCLUDE_DIRS="$($standard_include)" -DLIBUSB_INCLUDE_DIRS="$($libusb_include)" -DLIBUSB_LIBRARIES="$($libusb_lib)" -DL[...]
-cmake --build . --config Release
-cmake --install .
-cd ..\..\..
-rm -recurse -force bladeRF
+      - name: Upload Installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: SatDump-Windows_x64_Installer
+          path: ${{runner.workspace}}/build/SatDump-*.exe
 
-# Not compatible with ARM at this time
-if($platform -eq "x64-windows" -or $platform -eq "x86-windows")
-{
-    rm -recurse -force FX3-SDK, FX3-SDK.zip
-}
+      - name: Add dumpbin to PATH
+        run: echo "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\$((Get-ChildItem -Path \"C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\" | Sort-Obj[...]"
 
-Write-Output "Building UHD..."
-git clone https://github.com/EttusResearch/uhd # v4.8 (latest as of this writing) is not compatible with the latest MSVC
-cd uhd\host
-$null = mkdir build
-cd build
-cmake $build_args -DENABLE_MAN_PAGES=OFF -DENABLE_MANUAL=OFF -DENABLE_PYTHON_API=OFF -DENABLE_EXAMPLES=OFF -DENABLE_UTILS=OFF -DENABLE_TESTS=OFF -DPYTHON_EXECUTABLE="$((Get-Command python3).Sourc[...]
-cmake --build . --config Release
-cmake --install .
-cd ..\..\..
-rm -recurse -force uhd
+      - name: Build Portable
+        shell: powershell
+        run: ${{github.workspace}}\windows\Finish-Release.ps1 -platform x64-windows -BuildPath ${{runner.workspace}}\build
 
-cd ..
-rm -recurse -force build
+      - name: Upload Portable
+        uses: actions/upload-artifact@v4
+        with:
+          name: SatDump-Windows_x64_Portable
+          path: ${{runner.workspace}}/build/Release/*
 
-#Install SDRPlay API
-Invoke-WebRequest -Uri "https://www.satdump.org/SDRPlay.zip" -OutFile sdrplay.zip
-mkdir sdrplay | Out-Null
-Expand-Archive sdrplay.zip .
-cp sdrplay\API\inc\*.h installed\$platform\include
-cp sdrplay\API\$sdrplay_arch\sdrplay_api.dll installed\$platform\bin
-cp sdrplay\API\$sdrplay_arch\sdrplay_api.lib installed\$platform\lib
-Remove-Item sdrplay -Force -Recurse -ErrorAction SilentlyContinue
-Remove-Item sdrplay.zip
+  build_windows_arm64:
+    runs-on: windows-2022
 
-#Clean Up (Some packages are silly)
-mv installed\$platform\lib\*.dll installed\$platform\bin\
-mv installed\$platform\bin\*.lib installed\$platform\lib\
-cd ..
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        id: win-deps-arm64
+        with:
+          path: vcpkg
+          key: win-deps-arm64-${{ hashFiles('windows/Configure-vcpkg.ps1') }}
+
+      - name: Set up Python 3.13
+        if: steps.win-deps-arm64.outputs.cache-hit != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.13
+
+      - name: Install mako
+        if: steps.win-deps-arm64.outputs.cache-hit != 'true'
+        run: pip install mako
+
+      - name: Add msbuild to PATH
+        if: steps.win-deps-arm64.outputs.cache-hit != 'true'
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Update vcpkg
+        if: steps.win-deps-arm64.outputs.cache-hit == 'true'
+        shell: powershell
+        run: |
+          cd ${{github.workspace}}/vcpkg
+          git pull
+          .\vcpkg update
+
+      - name: Configure vcpkg
+        if: steps.win-deps-arm64.outputs.cache-hit != 'true'
+        shell: powershell
+        run: ${{github.workspace}}\windows\Configure-vcpkg.ps1 -platform arm64-windows
+
+      - name: Clean up vcpkg
+        if: steps.win-deps-arm64.outputs.cache-hit != 'true'
+        run: rm -recurse -force $Env:GITHUB_WORKSPACE/vcpkg/packages, $Env:GITHUB_WORKSPACE/vcpkg/downloads, $Env:GITHUB_WORKSPACE/vcpkg/buildtrees
+
+      - name: Add support to NSIS for long PATHs
+        shell: powershell
+        run: ${{github.workspace}}\windows\Get-NSIS-LongStrings.ps1
+
+      - name: Create Build Environment
+        run: cmake -E make_directory ${{runner.workspace}}/build
+
+      - name: Verify vcpkg installed libs (pthread) - ARM64
+        shell: powershell
+        run: |
+          $libPath = Join-Path $Env:GITHUB_WORKSPACE "vcpkg\installed\arm64-windows\lib\pthreadVC3.lib"
+          Write-Host "Checking for pthreadVC3.lib at $libPath"
+          if (-not (Test-Path $libPath)) {
+            Write-Host "ERROR: pthreadVC3.lib not found for arm64. Listing vcpkg installed tree for diagnosis..."
+            Get-ChildItem -Path (Join-Path $Env:GITHUB_WORKSPACE 'vcpkg\installed') -Recurse -Force | Select-Object FullName | ForEach-Object { Write-Host $_.FullName }
+            Write-Host "`nIf vcpkg aborted earlier then openblas or msys2 runtime probably failed to build/download. Ensure vcpkg ports are up-to-date (use main branch)."
+            exit 1
+          } else {
+            Write-Host "Found pthreadVC3.lib (arm64)"
+          }
+
+      - name: Configure CMake
+        working-directory: ${{runner.workspace}}/build
+        run: cmake -A ARM64 -DVCPKG_TARGET_TRIPLET="arm64-windows" -DVCPKG_HOST_TRIPLET="x64-windows" -DVCPKG_USE_HOST_TOOLS=ON -DCMAKE_SYSTEM_VERSION="10.0.22621.0" -DCMAKE_SYSTEM_NAME=Windows -[...]
+
+      - name: Build
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: cmake --build . --config $BUILD_TYPE
+
+      - name: Build Installer
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: cpack -C $BUILD_TYPE
+
+      - name: Upload Installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: SatDump-Windows_arm64_Installer
+          path: ${{runner.workspace}}/build/SatDump-*.exe
+
+      - name: Add dumpbin to PATH
+        run: echo "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\$((Get-ChildItem -Path \"C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\" | Sort-Ob[...]"
+
+      - name: Build Portable
+        shell: powershell
+        run: ${{github.workspace}}\windows\Finish-Release.ps1 -platform arm64-windows -BuildPath ${{runner.workspace}}\build
+
+      - name: Upload Portable
+        uses: actions/upload-artifact@v4
+        with:
+          name: SatDump-Windows_arm64_Portable
+          path: ${{runner.workspace}}/build/Release/*
+
+  build_android:
+    runs-on: android-release
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get dependency version
+        id: android-deps-ver
+        run: commit=$(git -C $GITHUB_WORKSPACE submodule status | grep android) && echo deps_version=${commit:1:6} >> $GITHUB_OUTPUT
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        id: android-deps
+        with:
+          path: android/deps
+          key: android-deps-${{steps.android-deps-ver.outputs.deps_version}}
+
+      - name: Build dependencies
+        if: steps.android-deps.outputs.cache-hit != 'true'
+        shell: bash
+        run: git submodule update --init && cd $GITHUB_WORKSPACE/android/deps && export ANDROID_HOME=/home/owner/android-sdk-linux && sh build.sh && rm .git
+
+      - name: Build
+        shell: bash
+        run: cd $GITHUB_WORKSPACE/android && export ANDROID_HOME=/home/owner/android-sdk-linux && sh /home/owner/build_release.sh
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SatDump-release.apk
+          path: ${{runner.workspace}}/SatDump/android/app/build/outputs/apk/release/app-release.apk
+
+  build_ubuntu_2204:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update repositories
+        run: sudo apt update
+
+      - name: Install dependencies
+        run: sudo apt install -y libdbus-1-dev libcurl4-openssl-dev libglfw3-dev libfftw3-dev libvolk2-dev build-essential cmake pkgconf libjpeg-dev libpng-dev libtiff-dev libairspy-dev libairspy[...]
+
+      - name: Create Build Environment
+        run: cmake -E make_directory ${{runner.workspace}}/build
+
+      - name: Configure CMake
+        shell: bash
+        working-directory: ${{runner.workspace}}/build
+        run: cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DCMAKE_INSTALL_PREFIX=/usr
+
+      - name: Build
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: make -j8
+
+      - name: Package
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: make package
+
+      - name: Upload ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: SatDump-Ubuntu-22.04
+          path: ${{runner.workspace}}/build/*.deb
+
+      - name: Setup pkg2appimage
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: wget https://raw.githubusercontent.com/probonopd/AppImages/master/pkg2appimage && chmod +x pkg2appimage && sudo apt install -y imagemagick desktop-file-utils libfuse2
+
+      - name: Make AppImage
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: cp *.deb /tmp/satdump.deb && cp $GITHUB_WORKSPACE/SatDump.yml . && ./pkg2appimage SatDump.yml
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: SatDump-AppImage
+          path: ${{runner.workspace}}/build/out/*.AppImage
+
+  build_ubuntu_2404:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update repositories
+        run: sudo apt update
+
+      - name: Install dependencies
+        run: sudo apt install -y libdbus-1-dev libcurl4-openssl-dev libglfw3-dev libfftw3-dev libvolk-dev build-essential cmake pkgconf libjpeg-dev libpng-dev libtiff-dev libairspy-dev libairspyh[...]
+
+      - name: Create Build Environment
+        run: cmake -E make_directory ${{runner.workspace}}/build
+
+      - name: Configure CMake
+        shell: bash
+        working-directory: ${{runner.workspace}}/build
+        run: cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DCMAKE_INSTALL_PREFIX=/usr
+
+      - name: Build
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: make -j8
+
+      - name: Package
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: make package
+
+      - name: Upload ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: SatDump-Ubuntu-24.04
+          path: ${{runner.workspace}}/build/*.deb
+
+  build_linux_arm64:
+    runs-on: ARM64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update repositories
+        run: sudo apt update
+
+      - name: Install dependencies
+        run: sudo apt install -y libdbus-1-dev libcurl4-openssl-dev libglfw3-dev libfftw3-dev libvolk2-dev build-essential cmake pkgconf libjpeg-dev libpng-dev libtiff-dev libairspy-dev libairspy[...]
+
+      - name: Delete build dir
+        run: rm -rf ${{runner.workspace}}/build
+
+      - name: Create Build Environment
+        run: cmake -E make_directory ${{runner.workspace}}/build
+
+      - name: Configure CMake
+        shell: bash
+        working-directory: ${{runner.workspace}}/build
+        run: cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE
+
+      - name: Build
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: make -j4
+
+      - name: Package
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: make package
+
+      - name: Upload ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: SatDump-Pi64-Latest
+          path: ${{runner.workspace}}/build/*.deb
+
+  build_macos_intel:
+    runs-on: macos-15-intel
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode version
+        run: sudo xcode-select -s '/Applications/Xcode_16.2.app/Contents/Developer'
+
+      - name: Install brew dependencies
+        run: brew install dylibbundler automake meson orc libxml2 zlib portaudio boost nng volk libomp glfw3 fftw libxml2 portaudio jemalloc nng armadillo hdf5
+
+      - name: Create Build Environment
+        run: cmake -E make_directory ${{runner.workspace}}/build
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        id: macos-deps-intel
+        with:
+          path: deps
+          key: macos-deps-intel-${{ hashFiles('macOS/build_deps.sh') }}
+
+      - name: Build dependencies
+        if: steps.macos-deps-intel.outputs.cache-hit != 'true'
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: $GITHUB_WORKSPACE/macOS/build_deps.sh
+
+      - name: Configure CMake
+        working-directory: ${{runner.workspace}}/build
+        run: cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DBUNDLING_MODE=ON -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+
+      - name: Build
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: make -j6
+
+      - name: Bundle
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: $GITHUB_WORKSPACE/macOS/bundle.sh
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: SatDump-macOS-Intel
+          path: ${{runner.workspace}}/build/*.dmg
+
+  build_macos_silicon:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode version
+        run: sudo xcode-select -s '/Applications/Xcode_16.2.app/Contents/Developer'
+
+      - name: Install brew dependencies
+        run: brew install dylibbundler libtool autoconf automake meson orc libxml2 zlib portaudio boost nng volk libomp glfw3 fftw libxml2 portaudio jemalloc nng armadillo hdf5
+
+      - name: Create Build Environment
+        run: cmake -E make_directory ${{runner.workspace}}/build
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        id: macos-deps-silicon
+        with:
+          path: deps
+          key: macos-deps-silicon-${{ hashFiles('macOS/build_deps.sh') }}
+
+      - name: Build dependencies
+        if: steps.macos-deps-silicon.outputs.cache-hit != 'true'
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: $GITHUB_WORKSPACE/macOS/build_deps.sh
+
+      - name: Configure CMake
+        working-directory: ${{runner.workspace}}/build
+        run: cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DBUNDLING_MODE=ON -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+
+      - name: Build
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: make -j6
+
+      - name: Bundle
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: $GITHUB_WORKSPACE/macOS/bundle.sh
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: SatDump-macOS-Silicon
+          path: ${{runner.workspace}}/build/*.dmg
+
+  update_nightly_release:
+    needs: [
+        "build_windows_x64",
+        "build_windows_arm64",
+        "build_ubuntu_2204",
+        "build_ubuntu_2404",
+        "build_macos_intel",
+        "build_macos_silicon",
+        "build_linux_arm64",
+        "build_android"
+    ]
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Install zip
+        run: sudo apt install -y unzip
+
+      - name: Copy files
+        run: |
+          mkdir satdump_out
+          cp SatDump-Ubuntu-22.04/satdump*.deb satdump_out/satdump_ubuntu_22.04_amd64.deb
+          cp SatDump-Ubuntu-24.04/satdump*.deb satdump_out/satdump_ubuntu_24.04_amd64.deb
+          cp SatDump-macOS-Intel/SatDump-macOS-Intel.dmg satdump_out/SatDump-macOS-Intel.dmg
+          cp SatDump-macOS-Silicon/SatDump-macOS-Silicon.dmg satdump_out/SatDump-macOS-Silicon.dmg
+          (cd SatDump-Windows_x64_Portable && zip -r ../satdump_out/SatDump-Windows_x64_Portable.zip *)
+          cp SatDump-Windows_x64_Installer/SatDump-*.exe satdump_out/SatDump-Windows_x64_Installer.exe
+          cp SatDump-Pi64-Latest/satdump*.deb satdump_out/satdump_rpi64_latest_arm64.deb
+          cp SatDump-release.apk/app-release.apk satdump_out/SatDump-Android.apk
+          cp SatDump-AppImage/*.AppImage satdump_out/SatDump.AppImage
+          (cd SatDump-Windows_arm64_Portable && zip -r ../satdump_out/SatDump-Windows_arm64_Portable.zip *)
+          cp SatDump-Windows_arm64_Installer/SatDump-*.exe satdump_out/SatDump-Windows_arm64_Installer.exe
+
+      - name: Update Nightly
+        run: gh release upload nightly satdump_out/* -R ${{github.repository}} --clobber
