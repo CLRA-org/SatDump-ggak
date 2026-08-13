@@ -39,7 +39,7 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Update vcpkg
-        if: steps.win-deps-x64.outputs.cache-hit != 'true'
+        if: steps.win-deps-x64.outputs.cache-hit == 'true'
         shell: powershell
         run: |
           cd ${{github.workspace}}/vcpkg
@@ -130,6 +130,14 @@ jobs:
       - name: Add msbuild to PATH
         if: steps.win-deps-arm64.outputs.cache-hit != 'true'
         uses: microsoft/setup-msbuild@v2
+
+      - name: Update vcpkg
+        if: steps.win-deps-arm64.outputs.cache-hit == 'true'
+        shell: powershell
+        run: |
+          cd ${{github.workspace}}/vcpkg
+          git pull
+          .\vcpkg update
 
       - name: Configure vcpkg
         if: steps.win-deps-arm64.outputs.cache-hit != 'true'
