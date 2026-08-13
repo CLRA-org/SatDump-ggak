@@ -38,6 +38,14 @@ jobs:
         if: steps.win-deps-x64.outputs.cache-hit != 'true'
         uses: microsoft/setup-msbuild@v2
 
+      - name: Update vcpkg
+        if: steps.win-deps-x64.outputs.cache-hit != 'true'
+        shell: powershell
+        run: |
+          cd ${{github.workspace}}/vcpkg
+          git pull
+          .\vcpkg update
+
       - name: Configure vcpkg
         if: steps.win-deps-x64.outputs.cache-hit != 'true'
         shell: powershell
@@ -205,10 +213,6 @@ jobs:
           path: ${{runner.workspace}}/SatDump/android/app/build/outputs/apk/release/app-release.apk
 
   build_ubuntu_2204:
-    # The CMake configure and build commands are platform agnostic and should work equally
-    # well on Windows or Mac.  You can convert this to a matrix build if you need
-    # cross-platform coverage.
-    # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
     runs-on: ubuntu-22.04
 
     steps:
@@ -221,30 +225,21 @@ jobs:
         run: sudo apt install -y libdbus-1-dev libcurl4-openssl-dev libglfw3-dev libfftw3-dev libvolk2-dev build-essential cmake pkgconf libjpeg-dev libpng-dev libtiff-dev libairspy-dev libairspyhf-dev libhackrf-dev librtlsdr-dev libomp-dev libnng-dev libiio-dev libzstd-dev libad9361-dev libbladerf-dev libuhd-dev liblimesuite-dev ocl-icd-opencl-dev libjemalloc-dev portaudio19-dev libhdf5-dev
 
       - name: Create Build Environment
-        # Some projects don't allow in-source building, so create a separate build directory
-        # We'll use this as our working directory for all subsequent commands
         run: cmake -E make_directory ${{runner.workspace}}/build
 
       - name: Configure CMake
-        # Use a bash shell so we can use the same syntax for environment variable
-        # access regardless of the host operating system
         shell: bash
         working-directory: ${{runner.workspace}}/build
-        # Note the current convention is to use the -S and -B options here to specify source
-        # and build directories, but this is only available with CMake 3.13 and higher.
-        # The CMake binaries on the Github Actions machines are (as of this writing) 3.12
         run: cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DCMAKE_INSTALL_PREFIX=/usr
 
       - name: Build
         working-directory: ${{runner.workspace}}/build
         shell: bash
-        # Execute the build.  You can specify a specific target with "--target <NAME>"
         run: make -j8
 
       - name: Package
         working-directory: ${{runner.workspace}}/build
         shell: bash
-        # Execute the build.  You can specify a specific target with "--target <NAME>"
         run: make package
 
       - name: Upload ZIP
@@ -256,13 +251,11 @@ jobs:
       - name: Setup pkg2appimage
         working-directory: ${{runner.workspace}}/build
         shell: bash
-        # Execute the build.  You can specify a specific target with "--target <NAME>"
         run: wget https://raw.githubusercontent.com/probonopd/AppImages/master/pkg2appimage && chmod +x pkg2appimage && sudo apt install -y imagemagick desktop-file-utils libfuse2
 
       - name: Make AppImage
         working-directory: ${{runner.workspace}}/build
         shell: bash
-        # Execute the build.  You can specify a specific target with "--target <NAME>"
         run: cp *.deb /tmp/satdump.deb && cp $GITHUB_WORKSPACE/SatDump.yml . && ./pkg2appimage SatDump.yml
 
       - name: Upload AppImage
@@ -272,10 +265,6 @@ jobs:
           path: ${{runner.workspace}}/build/out/*.AppImage
 
   build_ubuntu_2404:
-    # The CMake configure and build commands are platform agnostic and should work equally
-    # well on Windows or Mac.  You can convert this to a matrix build if you need
-    # cross-platform coverage.
-    # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
     runs-on: ubuntu-24.04
 
     steps:
@@ -288,30 +277,21 @@ jobs:
         run: sudo apt install -y libdbus-1-dev libcurl4-openssl-dev libglfw3-dev libfftw3-dev libvolk-dev build-essential cmake pkgconf libjpeg-dev libpng-dev libtiff-dev libairspy-dev libairspyhf-dev libhackrf-dev librtlsdr-dev libomp-dev libnng-dev libiio-dev libzstd-dev libad9361-dev libbladerf-dev libuhd-dev liblimesuite-dev ocl-icd-opencl-dev libjemalloc-dev portaudio19-dev libhdf5-dev
 
       - name: Create Build Environment
-        # Some projects don't allow in-source building, so create a separate build directory
-        # We'll use this as our working directory for all subsequent commands
         run: cmake -E make_directory ${{runner.workspace}}/build
 
       - name: Configure CMake
-        # Use a bash shell so we can use the same syntax for environment variable
-        # access regardless of the host operating system
         shell: bash
         working-directory: ${{runner.workspace}}/build
-        # Note the current convention is to use the -S and -B options here to specify source
-        # and build directories, but this is only available with CMake 3.13 and higher.
-        # The CMake binaries on the Github Actions machines are (as of this writing) 3.12
         run: cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DCMAKE_INSTALL_PREFIX=/usr
 
       - name: Build
         working-directory: ${{runner.workspace}}/build
         shell: bash
-        # Execute the build.  You can specify a specific target with "--target <NAME>"
         run: make -j8
 
       - name: Package
         working-directory: ${{runner.workspace}}/build
         shell: bash
-        # Execute the build.  You can specify a specific target with "--target <NAME>"
         run: make package
 
       - name: Upload ZIP
@@ -321,10 +301,6 @@ jobs:
           path: ${{runner.workspace}}/build/*.deb
 
   build_linux_arm64:
-    # The CMake configure and build commands are platform agnostic and should work equally
-    # well on Windows or Mac.  You can convert this to a matrix build if you need
-    # cross-platform coverage.
-    # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
     runs-on: ARM64
 
     steps:
@@ -340,30 +316,21 @@ jobs:
         run: rm -rf ${{runner.workspace}}/build
 
       - name: Create Build Environment
-        # Some projects don't allow in-source building, so create a separate build directory
-        # We'll use this as our working directory for all subsequent commands
         run: cmake -E make_directory ${{runner.workspace}}/build
 
       - name: Configure CMake
-        # Use a bash shell so we can use the same syntax for environment variable
-        # access regardless of the host operating system
         shell: bash
         working-directory: ${{runner.workspace}}/build
-        # Note the current convention is to use the -S and -B options here to specify source
-        # and build directories, but this is only available with CMake 3.13 and higher.
-        # The CMake binaries on the Github Actions machines are (as of this writing) 3.12
         run: cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE
 
       - name: Build
         working-directory: ${{runner.workspace}}/build
         shell: bash
-        # Execute the build.  You can specify a specific target with "--target <NAME>"
         run: make -j4
 
       - name: Package
         working-directory: ${{runner.workspace}}/build
         shell: bash
-        # Execute the build.  You can specify a specific target with "--target <NAME>"
         run: make package
 
       - name: Upload ZIP
@@ -382,14 +349,9 @@ jobs:
         run: sudo xcode-select -s '/Applications/Xcode_16.2.app/Contents/Developer'
 
       - name: Install brew dependencies
-        # These are preinstalled in the GitHub runners, cause needless warnings to appear
-        # Add these back if these ever become missing for some reason
-        # sqlite3 libtool autoconf libjpeg-turbo libtiff libusb libpng zstd
-        run: brew install dylibbundler automake meson orc libxml2 zlib portaudio boost nng volk libomp glfw3 fftw libxml2 portaudio jemalloc nng armadillo hdf5 
+        run: brew install dylibbundler automake meson orc libxml2 zlib portaudio boost nng volk libomp glfw3 fftw libxml2 portaudio jemalloc nng armadillo hdf5
 
       - name: Create Build Environment
-        # Some projects don't allow in-source building, so create a separate build directory
-        # We'll use this as our working directory for all subsequent commands
         run: cmake -E make_directory ${{runner.workspace}}/build
 
       - name: Cache dependencies
@@ -398,36 +360,25 @@ jobs:
         with:
           path: deps
           key: macos-deps-intel-${{ hashFiles('macOS/build_deps.sh') }}
-      
+
       - name: Build dependencies
         if: steps.macos-deps-intel.outputs.cache-hit != 'true'
         working-directory: ${{runner.workspace}}/build
         shell: bash
         run: $GITHUB_WORKSPACE/macOS/build_deps.sh
-      
+
       - name: Configure CMake
         working-directory: ${{runner.workspace}}/build
-        # Note the current convention is to use the -S and -B options here to specify source
-        # and build directories, but this is only available with CMake 3.13 and higher.
-        # The CMake binaries on the Github Actions machines are (as of this writing) 3.12
         run: cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DBUNDLING_MODE=ON -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
 
       - name: Build
         working-directory: ${{runner.workspace}}/build
         shell: bash
-        # Execute the build.  You can specify a specific target with "--target <NAME>"
         run: make -j6
 
       - name: Bundle
         working-directory: ${{runner.workspace}}/build
         shell: bash
-        #env:
-        #  MACOS_TEAM: ${{ secrets.MACOS_TEAM }}
-        #  MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
-        #  MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
-        #  MACOS_SIGNING_SIGNATURE: ${{ secrets.MACOS_SIGNING_SIGNATURE }}
-        #  MACOS_NOTARIZATION_UN: ${{ secrets.MACOS_NOTARIZATION_UN }}
-        #  MACOS_NOTARIZATION_PWD: ${{ secrets.MACOS_NOTARIZATION_PWD }}
         run: $GITHUB_WORKSPACE/macOS/bundle.sh
 
       - name: Upload DMG
@@ -445,14 +396,9 @@ jobs:
         run: sudo xcode-select -s '/Applications/Xcode_16.2.app/Contents/Developer'
 
       - name: Install brew dependencies
-        # These are preinstalled in the GitHub runners, cause needless warnings to appear
-        # Add these back if these ever become missing for some reason
-        # sqlite3 zstd libpng libtiff libjpeg-turbo libusb
-        run: brew install dylibbundler libtool autoconf automake meson orc libxml2 zlib portaudio boost nng volk libomp glfw3 fftw libxml2 portaudio jemalloc nng armadillo hdf5 
+        run: brew install dylibbundler libtool autoconf automake meson orc libxml2 zlib portaudio boost nng volk libomp glfw3 fftw libxml2 portaudio jemalloc nng armadillo hdf5
 
       - name: Create Build Environment
-        # Some projects don't allow in-source building, so create a separate build directory
-        # We'll use this as our working directory for all subsequent commands
         run: cmake -E make_directory ${{runner.workspace}}/build
 
       - name: Cache dependencies
@@ -461,36 +407,25 @@ jobs:
         with:
           path: deps
           key: macos-deps-silicon-${{ hashFiles('macOS/build_deps.sh') }}
-      
+
       - name: Build dependencies
         if: steps.macos-deps-silicon.outputs.cache-hit != 'true'
         working-directory: ${{runner.workspace}}/build
         shell: bash
         run: $GITHUB_WORKSPACE/macOS/build_deps.sh
-      
+
       - name: Configure CMake
         working-directory: ${{runner.workspace}}/build
-        # Note the current convention is to use the -S and -B options here to specify source
-        # and build directories, but this is only available with CMake 3.13 and higher.
-        # The CMake binaries on the Github Actions machines are (as of this writing) 3.12
         run: cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DBUNDLING_MODE=ON -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
 
       - name: Build
         working-directory: ${{runner.workspace}}/build
         shell: bash
-        # Execute the build.  You can specify a specific target with "--target <NAME>"
         run: make -j6
 
       - name: Bundle
         working-directory: ${{runner.workspace}}/build
         shell: bash
-        #env:
-        #  MACOS_TEAM: ${{ secrets.MACOS_TEAM }}
-        #  MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
-        #  MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
-        #  MACOS_SIGNING_SIGNATURE: ${{ secrets.MACOS_SIGNING_SIGNATURE }}
-        #  MACOS_NOTARIZATION_UN: ${{ secrets.MACOS_NOTARIZATION_UN }}
-        #  MACOS_NOTARIZATION_PWD: ${{ secrets.MACOS_NOTARIZATION_PWD }}
         run: $GITHUB_WORKSPACE/macOS/bundle.sh
 
       - name: Upload DMG
@@ -499,7 +434,6 @@ jobs:
           name: SatDump-macOS-Silicon
           path: ${{runner.workspace}}/build/*.dmg
 
-  # Yes, since I was asked to do like SDR++ for this I did look at how Ryzerth has done it :-)
   update_nightly_release:
     needs: [
         "build_windows_x64",
@@ -509,7 +443,8 @@ jobs:
         "build_macos_intel",
         "build_macos_silicon",
         "build_linux_arm64",
-        "build_android"]
+        "build_android"
+    ]
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
 
@@ -521,7 +456,19 @@ jobs:
         run: sudo apt install -y unzip
 
       - name: Copy files
-        run: mkdir satdump_out && cp SatDump-Ubuntu-22.04/satdump*.deb satdump_out/satdump_ubuntu_22.04_amd64.deb && cp SatDump-Ubuntu-24.04/satdump*.deb satdump_out/satdump_ubuntu_24.04_amd64.deb && cp SatDump-macOS-Intel/SatDump-macOS-Intel.dmg satdump_out/SatDump-macOS-Intel.dmg && cp SatDump-macOS-Silicon/SatDump-macOS-Silicon.dmg satdump_out/SatDump-macOS-Silicon.dmg && (cd SatDump-Windows_x64_Portable && zip -r ../satdump_out/SatDump-Windows_x64_Portable.zip *) && cp SatDump-Windows_x64_Installer/SatDump-*.exe satdump_out/SatDump-Windows_x64_Installer.exe && cp SatDump-Pi64-Latest/satdump*.deb satdump_out/satdump_rpi64_latest_arm64.deb && cp SatDump-release.apk/app-release.apk satdump_out/SatDump-Android.apk && cp SatDump-AppImage/*.AppImage satdump_out/SatDump.AppImage && (cd SatDump-Windows_arm64_Portable && zip -r ../satdump_out/SatDump-Windows_arm64_Portable.zip *) && cp SatDump-Windows_arm64_Installer/SatDump-*.exe satdump_out/SatDump-Windows_arm64_Installer.exe
+        run: |
+          mkdir satdump_out
+          cp SatDump-Ubuntu-22.04/satdump*.deb satdump_out/satdump_ubuntu_22.04_amd64.deb
+          cp SatDump-Ubuntu-24.04/satdump*.deb satdump_out/satdump_ubuntu_24.04_amd64.deb
+          cp SatDump-macOS-Intel/SatDump-macOS-Intel.dmg satdump_out/SatDump-macOS-Intel.dmg
+          cp SatDump-macOS-Silicon/SatDump-macOS-Silicon.dmg satdump_out/SatDump-macOS-Silicon.dmg
+          (cd SatDump-Windows_x64_Portable && zip -r ../satdump_out/SatDump-Windows_x64_Portable.zip *)
+          cp SatDump-Windows_x64_Installer/SatDump-*.exe satdump_out/SatDump-Windows_x64_Installer.exe
+          cp SatDump-Pi64-Latest/satdump*.deb satdump_out/satdump_rpi64_latest_arm64.deb
+          cp SatDump-release.apk/app-release.apk satdump_out/SatDump-Android.apk
+          cp SatDump-AppImage/*.AppImage satdump_out/SatDump.AppImage
+          (cd SatDump-Windows_arm64_Portable && zip -r ../satdump_out/SatDump-Windows_arm64_Portable.zip *)
+          cp SatDump-Windows_arm64_Installer/SatDump-*.exe satdump_out/SatDump-Windows_arm64_Installer.exe
 
       - name: Update Nightly
         run: gh release upload nightly satdump_out/* -R ${{github.repository}} --clobber
