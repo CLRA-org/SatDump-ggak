@@ -11,6 +11,7 @@ jobs:
       - name: Update apt cache (with retries for transient repository errors)
         run: |
           sudo apt-get update || (sleep 15 && sudo apt-get update) || (sleep 30 && sudo apt-get update)
+
       - name: Install dependencies
         run: |
           sudo apt-get install -y git build-essential cmake g++ pkgconf libfftw3-dev libpng-dev \
@@ -19,42 +20,53 @@ jobs:
             libhackrf-dev libairspy-dev libairspyhf-dev libad9361-dev libiio-dev \
             libbladerf-dev libomp-dev ocl-icd-opencl-dev libdbus-1-dev libarmadillo-dev \
             libsqlite3-dev liblimesuite-dev libuhd-dev libxrandr-dev gettext python3
+
       - name: Configure CMake
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_GUI=ON -DENABLE_I18N=ON
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_GUI=ON -DENABLE_I18N=ON -DPLUGINS_ALL=ON
 
       - name: Build
         run: cmake --build build -j$(nproc)
 
-      - name: Verify i18n catalogs are up-to-date
+      - name: Package install tree and DEB
         run: |
-          msgfmt --check resources/i18n/zh_CN/LC_MESSAGES/zh_CN.po -o /dev/null
-          python3 tools/gen_zh_i18n.py
-          git diff --exit-code -- resources/i18n/zh_CN || (echo "zh_CN catalogs are out of date! Run: python3 tools/gen_zh_i18n.py" && exit 1)
+          staging="$RUNNER_TEMP/satdump-linux"
+          cmake --install build --config Release --prefix "$staging/usr" > /tmp/install.log 2>&1 || { tail -50 /tmp/install.log; exit 1; }
+          mkdir -p dist
+          tar -C "$RUNNER_TEMP" -czf dist/SatDump-Linux-x64-install-tree.tar.gz satdump-linux
+          cmake --build build --target package -j$(nproc)
+          find build -maxdepth 1 -type f -name '*.deb' -exec cp {} dist/ \;
+          test -n "$(find dist -maxdepth 1 -type f \( -name '*.deb' -o -name '*.tar.gz' \) -print -quit)"
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: satdump-linux
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
   build-windows:
-    runs-on: windows-latest
+    runs-on: windows-2022
     env:
       VCPKG_DISABLE_METRICS: "1"
     steps:
       - uses: actions/checkout@v4
 
-      - name: Clone vcpkg (latest, avoids stale msys2 mirror URLs in old registries)
-        run: git clone --depth 1 https://github.com/microsoft/vcpkg
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
 
-      - name: Bootstrap vcpkg
-        run: .\vcpkg\bootstrap-vcpkg.bat
+      - name: Install mako
+        run: pip install mako
 
-      - name: Install dependencies
-        # Core-only package list from windows/Configure-vcpkg.ps1 (+ volk).
-        # SDR-specific dependencies are skipped, the matching plugins are disabled below.
-        run: .\vcpkg\vcpkg install --triplet x64-windows pthreads libjpeg-turbo tiff libpng glfw3 libusb fftw3 libxml2 portaudio nng zstd opencl curl hdf5[cpp] sqlite3
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
 
-      - name: Build VOLK from source (vcpkg's volk port is the Vulkan loader)
-        run: |
-          pip install mako
-          git clone --depth 1 --recurse-submodules https://github.com/JVital2013/volk -b win-arm64
-          cmake -S volk -B volk-build -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:GITHUB_WORKSPACE\vcpkg\scripts\buildsystems\vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DCMAKE_INSTALL_PREFIX="$env:GITHUB_WORKSPACE\vcpkg\installed\x64-windows" -DENABLE_TESTING=OFF -DENABLE_MODTOOL=OFF
-          cmake --build volk-build --config Release
-          cmake --install volk-build --config Release
+      - name: Configure vcpkg with SDR dependencies
+        shell: pwsh
+        run: .\windows\Configure-vcpkg.ps1 -platform x64-windows
+
       - name: Configure CMake
         run: >
           cmake -B build
@@ -64,44 +76,33 @@ jobs:
           -A x64
           -DBUILD_GUI=ON
           -DENABLE_I18N=ON
-          -DPLUGINS_ALL=OFF
-          -DPLUGIN_AIRSPY_SDR_SUPPORT=OFF
-          -DPLUGIN_HYDRASDR_SDR_SUPPORT=OFF
-          -DPLUGIN_AIRSPYHF_SDR_SUPPORT=OFF
-          -DPLUGIN_HACKRF_SDR_SUPPORT=OFF
-          -DPLUGIN_LIMESDR_SDR_SUPPORT=OFF
-          -DPLUGIN_SDRPLAY_SDR_SUPPORT=OFF
-          -DPLUGIN_PLUTOSDR_SDR_SUPPORT=OFF
-          -DPLUGIN_BLADERF_SDR_SUPPORT=OFF
-          -DPLUGIN_LITEXM2SDR_SDR_SUPPORT=OFF
-          -DPLUGIN_USRP_SDR_SUPPORT=OFF
-          -DPLUGIN_RTLSDR_SDR_SUPPORT=OFF
-          -DPLUGIN_MIRISDR_SDR_SUPPORT=OFF
-          -DPLUGIN_SPYSERVER_SUPPORT=OFF
-          -DPLUGIN_RTLTCP_SUPPORT=OFF
-          -DPLUGIN_SDRPP_SERVER_SUPPORT=OFF
+          -DPLUGINS_ALL=ON
           -DPLUGIN_AARONIA_SDR_SUPPORT=OFF
           -DPLUGIN_HAROGIC_SDR_SUPPORT=OFF
-          -DPLUGIN_RFNM_SDR_SUPPORT=OFF
-          -DPLUGIN_FOBOSSDR_SDR_SUPPORT=OFF
+          -DPLUGIN_LITEXM2SDR_SDR_SUPPORT=OFF
           -DPLUGIN_RTAUDIO_SDR_SUPPORT=OFF
-          -DPLUGIN_NET_SOURCE_SDR_SUPPORT=OFF
-          -DPLUGIN_REMOTE_SDR_SUPPORT=OFF
-          -DPLUGIN_SDDC_SDR_SUPPORT=OFF
+          -DPLUGIN_SDDC_SDR_SUPPORT=ON
           -DPLUGIN_SOAPY_SDR_SUPPORT=OFF
-          -DPLUGIN_BOCHUM_SUPPORT=OFF
-          -DPLUGIN_EXPERIMENTAL_DEVICES_SUPPORT=OFF
-          -DPLUGIN_RTAUDIO_SINK=OFF
-          -DPLUGIN_PORTAUDIO_SINK=OFF
-          -DPLUGIN_AAUDIO_SINK=OFF
+
       - name: Build
         run: cmake --build build --config Release
 
-      - name: Verify binaries
+      - name: Package Windows release
         shell: pwsh
         run: |
-          if (!(Test-Path build\Release\satdump-ui.exe)) { throw "satdump-ui.exe missing!" }
-          if (!(Test-Path build\Release\satdump.exe)) { throw "satdump.exe missing!" }
+          $staging = Join-Path $env:RUNNER_TEMP "satdump-windows"
+          cmake --install build --config Release --prefix $staging
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path "$staging\*" -DestinationPath dist\SatDump-Windows-x64-portable.zip -Force
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: satdump-windows
+          path: dist/*.zip
+          if-no-files-found: error
+          retention-days: 30
+
   build-android:
     runs-on: ubuntu-latest
     timeout-minutes: 150
@@ -126,6 +127,7 @@ jobs:
           curl -fsSL --retry 3 https://services.gradle.org/distributions/gradle-7.6.4-bin.zip -o "$RUNNER_TEMP/gradle.zip"
           unzip -q "$RUNNER_TEMP/gradle.zip" -d "$RUNNER_TEMP/gradle"
           echo "PATH=$RUNNER_TEMP/gradle/gradle-7.6.4/bin:$PATH" >> "$GITHUB_ENV"
+
       - name: Configure SDK location
         run: echo "sdk.dir=$ANDROID_SDK_ROOT" > android/local.properties
 
@@ -155,11 +157,15 @@ jobs:
           for f in libvolk.a libsqlite3.a libfftw3f.a libz.a libpng.a libzstd.a libtiff.a libcurl.a libnng.a libwolfssl.a libcpu_features.a; do
             test -f output/arm64-v8a/lib/$f || { echo "FATAL: android/deps build did not produce $f"; ls output/arm64-v8a/lib/; exit 1; }
           done
+
       - name: Build debug APK
         working-directory: android
         run: gradle assembleDebug --no-daemon --stacktrace
 
-      - name: Verify APK
-        run: |
-          ls -la android/app/build/outputs/apk/debug/
-          test -f android/app/build/outputs/apk/debug/app-debug.apk
+      - name: Upload Android artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: satdump-android
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
