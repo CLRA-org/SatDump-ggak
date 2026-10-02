@@ -153,22 +153,65 @@ if($env:PROCESSOR_ARCHITECTURE -ne $arch)
 #TEMPORARY: Use an unmerged PR of LibUSB to allow setting RAW_IO on USB transfers. This is needed to
 #           prevent sample drops on some Windows machines with USB SDRs
 #           Update Jan. 30, 2025: There's nothing more permanent than a temporary measure :-)
-Write-Output "Building libusb..."
+# 从 vcpkg triplet 推导 MSBuild 平台名
+# x64-windows   -> x64
+# arm64-windows -> ARM64
+# x86-windows   -> Win32
+$msbuildPlatform = switch -Wildcard ($platform) {
+    'x64-*'   { 'x64' }
+    'arm64-*' { 'ARM64' }
+    'x86-*'   { 'Win32' }
+    default   { throw "Unsupported vcpkg triplet for MSBuild: $platform" }
+}
+
+Write-Output "Building libusb (platform: $msbuildPlatform)..."
 git clone https://github.com/HannesFranke-smartoptics/libusb -b raw_io_v2
-cd libusb\msvc
-(Get-Content -raw Base.props) -replace "<TreatWarningAsError>true</TreatWarningAsError>", "<TreatWarningAsError>false</TreatWarningAsError>" | Set-Content -Encoding ASCII Base.props
-msbuild -m -v:m -p:Platform=$generator,Configuration=Release .\libusb.sln
-msbuild -m -v:m -p:Platform=$generator,Configuration=Debug .\libusb.sln
-$toolset_used=$(get-childitem ..\build\)[0].Name
-cp -Force ..\build\$toolset_used\$generator\Release\dll\libusb-1.0.dll ..\..\..\installed\$platform\bin
-cp -Force ..\build\$toolset_used\$generator\Release\dll\libusb-1.0.pdb ..\..\..\installed\$platform\bin
-cp -Force ..\build\$toolset_used\$generator\Release\dll\libusb-1.0.lib ..\..\..\installed\$platform\lib
-cp -Force ..\build\$toolset_used\$generator\Debug\dll\libusb-1.0.dll ..\..\..\installed\$platform\Debug\bin
-cp -Force ..\build\$toolset_used\$generator\Debug\dll\libusb-1.0.pdb ..\..\..\installed\$platform\Debug\bin
-cp -Force ..\build\$toolset_used\$generator\Debug\dll\libusb-1.0.lib ..\..\..\installed\$platform\Debug\lib
-cp -force ..\libusb\libusb.h ..\..\..\installed\$platform\include
-cd ..\..
-rm -recurse -force libusb
+if ($LASTEXITCODE -ne 0) { throw "git clone libusb failed" }
+
+Push-Location libusb\msvc
+try {
+    (Get-Content -raw Base.props) `
+        -replace '<TreatWarningAsError>true</TreatWarningAsError>', '<TreatWarningAsError>false</TreatWarningAsError>' `
+        | Set-Content -Encoding ASCII Base.props
+
+    msbuild -m -v:m -p:Configuration=Release -p:Platform=$msbuildPlatform .\libusb.sln
+    if ($LASTEXITCODE -ne 0) { throw "libusb Release build failed (exit $LASTEXITCODE)" }
+
+    msbuild -m -v:m -p:Configuration=Debug -p:Platform=$msbuildPlatform .\libusb.sln
+    if ($LASTEXITCODE -ne 0) { throw "libusb Debug build failed (exit $LASTEXITCODE)" }
+
+    $buildRoot = '..\build'
+    if (-not (Test-Path $buildRoot)) {
+        throw "libusb build output directory not found: $buildRoot (MSBuild did not produce output)"
+    }
+    $toolset_used = (Get-ChildItem $buildRoot | Select-Object -First 1).Name
+    Write-Output "libusb toolset directory: $toolset_used"
+
+    $releaseDir = "..\build\$toolset_used\$msbuildPlatform\Release\dll"
+    $debugDir   = "..\build\$toolset_used\$msbuildPlatform\Debug\dll"
+    $incDir     = "..\..\..\installed\$platform\include"
+    $binDir     = "..\..\..\installed\$platform\bin"
+    $dbgBinDir  = "..\..\..\installed\$platform\Debug\bin"
+    $libDir     = "..\..\..\installed\$platform\lib"
+    $dbgLibDir  = "..\..\..\installed\$platform\Debug\lib"
+
+    foreach ($d in @($incDir, $binDir, $dbgBinDir, $libDir, $dbgLibDir)) {
+        New-Item -ItemType Directory -Force -Path $d | Out-Null
+    }
+
+    Copy-Item -Force "$releaseDir\libusb-1.0.dll" $binDir
+    Copy-Item -Force "$releaseDir\libusb-1.0.pdb" $binDir
+    Copy-Item -Force "$releaseDir\libusb-1.0.lib" $libDir
+    Copy-Item -Force "$debugDir\libusb-1.0.dll"   $dbgBinDir
+    Copy-Item -Force "$debugDir\libusb-1.0.pdb"   $dbgBinDir
+    Copy-Item -Force "$debugDir\libusb-1.0.lib"   $dbgLibDir
+    Copy-Item -Force "..\libusb\libusb.h"         $incDir
+}
+finally {
+    Pop-Location
+}
+
+Remove-Item -Recurse -Force libusb
 
 Write-Output "Building cpu_features..."
 git clone https://github.com/google/cpu_features -b v0.10.1
