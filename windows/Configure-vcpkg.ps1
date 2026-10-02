@@ -119,7 +119,7 @@ if ($LASTEXITCODE -ne 0) {
 
 # Core packages. libxml2 is for libiio
 Write-Output "Installing core vcpkg packages..."
-.\vcpkg install --triplet $platform pthreads libjpeg-turbo tiff libpng glfw3 libusb fftw3 libxml2 portaudio nng zstd armadillo opencl curl[schannel] hdf5[cpp] sqlite3
+.\vcpkg install --triplet $platform pthreads libjpeg-turbo tiff libpng glfw3 libusb fftw3 libxml2 portaudio nng zstd armadillo opencl curl hdf5[cpp] sqlite3
 if ($LASTEXITCODE -ne 0) {
     Write-Error "vcpkg core packages installation failed with exit code $LASTEXITCODE"
     exit 1
