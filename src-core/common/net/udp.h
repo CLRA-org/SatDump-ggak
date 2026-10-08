@@ -129,7 +129,7 @@ namespace net
             struct timeval read_timeout;
             read_timeout.tv_sec = 0;
             read_timeout.tv_usec = 1e4;
-            setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &read_timeout, sizeof read_timeout);
+            setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char *)&read_timeout, sizeof read_timeout);
         }
 
         int send(uint8_t *data, int len)
