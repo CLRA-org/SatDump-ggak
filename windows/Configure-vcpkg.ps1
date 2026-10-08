@@ -344,6 +344,9 @@ if($platform -eq "x64-windows" -or $platform -eq "x86-windows")
     Invoke-WebRequest -Uri "https://github.com/myriadrf/LimeSuite/archive/refs/tags/v23.11.0.tar.gz" -OutFile $limesuite_tarball
     tar -xzf $limesuite_tarball
     Move-Item LimeSuite-23.11.0 LimeSuite
+    # Fix missing <chrono> include for MSVC 14.44+
+    Add-Content -Path LimeSuite\src\lms7002m_mcu\MCU_BD.cpp -Value "`n#include <chrono>" -Encoding ASCII -NoNewline
+    Add-Content -Path LimeSuite\src\protocols\fifo.h -Value "`n#include <chrono>" -Encoding ASCII -NoNewline
     cd LimeSuite
     $null = mkdir build-dir
     cd build-dir
