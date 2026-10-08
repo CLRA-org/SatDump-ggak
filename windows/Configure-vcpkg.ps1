@@ -345,8 +345,12 @@ if($platform -eq "x64-windows" -or $platform -eq "x86-windows")
     tar -xzf $limesuite_tarball
     Move-Item LimeSuite-23.11.0 LimeSuite
     # Fix missing <chrono> include for MSVC 14.44+
-    Add-Content -Path LimeSuite\src\lms7002m_mcu\MCU_BD.cpp -Value "`n#include <chrono>" -Encoding ASCII -NoNewline
-    Add-Content -Path LimeSuite\src\protocols\fifo.h -Value "`n#include <chrono>" -Encoding ASCII -NoNewline
+    $mcuBd = Get-Content -raw LimeSuite\src\lms7002m_mcu\MCU_BD.cpp
+    $mcuBd = $mcuBd -replace '#include "MCU_BD.h"', "#include `"MCU_BD.h`"`n#include <chrono>"
+    Set-Content -Path LimeSuite\src\lms7002m_mcu\MCU_BD.cpp -Value $mcuBd -Encoding ASCII -NoNewline
+    $fifo = Get-Content -raw LimeSuite\src\protocols\fifo.h
+    $fifo = $fifo -replace '#include <mutex>', "#include <chrono>`n#include <mutex>"
+    Set-Content -Path LimeSuite\src\protocols\fifo.h -Value $fifo -Encoding ASCII -NoNewline
     cd LimeSuite
     $null = mkdir build-dir
     cd build-dir
@@ -358,25 +362,22 @@ if($platform -eq "x64-windows" -or $platform -eq "x86-windows")
 }
 
 Write-Output "Building bladeRF..."
-git clone https://github.com/Nuand/bladeRF --depth 1 -b 2024.05
+git clone https://github.com/Nuand/bladeRF --depth 1 -b libbladeRF_v2.6.0
 cd bladeRF\host
-Clear-Content cmake/modules/FindLibPThreadsWin32.cmake
-Clear-Content cmake/modules/FindLibUSB.cmake
-(Get-Content -raw CMakeLists.txt) -replace "(?ms)find_package\(LibPThreadsWin32\).*endif\(LIBUSB_FOUND\)", "" | Set-Content -Encoding ASCII CMakeLists.txt
 $null = mkdir build
 cd build
-cmake $build_args -DTREAT_WARNINGS_AS_ERRORS=OFF -DLIBPTHREADSWIN32_INCLUDE_DIRS="$($standard_include)" -DLIBUSB_INCLUDE_DIRS="$($libusb_include)" -DLIBUSB_LIBRARIES="$($libusb_lib)" -DLIBPTHREADSWIN32_LIBRARIES="$($pthread_lib)" ..
+cmake $build_args -DTREAT_WARNINGS_AS_ERRORS=OFF ..
 cmake --build . --config Release
 cmake --install .
 cd ..\..\..
 rm -recurse -force bladeRF
 
 Write-Output "Building UHD..."
-git clone https://github.com/EttusResearch/uhd # v4.8 (latest as of this writing) is not compatible with the latest MSVC
+git clone https://github.com/EttusResearch/uhd --depth 1 -b v4.10.0.0
 cd uhd\host
 $null = mkdir build
 cd build
-cmake $build_args -DENABLE_MAN_PAGES=OFF -DENABLE_MANUAL=OFF -DENABLE_PYTHON_API=OFF -DENABLE_EXAMPLES=OFF -DENABLE_UTILS=OFF -DENABLE_TESTS=OFF -DPYTHON_EXECUTABLE="$((Get-Command python3).Source)" ..
+cmake $build_args -DCMAKE_CXX_FLAGS="/EHsc /FIwinsock2.h" -DCMAKE_POLICY_VERSION_MINIMUM="3.5" -DENABLE_MAN_PAGES=OFF -DENABLE_MANUAL=OFF -DENABLE_PYTHON_API=OFF -DENABLE_EXAMPLES=OFF -DENABLE_UTILS=OFF -DENABLE_TESTS=OFF -DPYTHON_EXECUTABLE="$((Get-Command python3).Source)" ..
 cmake --build . --config Release
 cmake --install .
 cd ..\..\..
