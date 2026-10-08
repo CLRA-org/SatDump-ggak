@@ -4,6 +4,12 @@
 #include <setjmp.h>
 #include "bpe_internal.h"
 
+#if defined(_MSC_VER)
+#define BPE_TLS __declspec(thread)
+#else
+#define BPE_TLS __thread
+#endif
+
 const char *BpeErrorMsg[] = {
     "Success",
     "Error code 1: Bit stream end",
@@ -29,7 +35,7 @@ const char *BpeErrorMsg[] = {
  * Set by _bpe_set_ctx() before calling encode/decode; cleared after.
  * Allows ErrorMsg() to reach the context from deep call stacks that
  * do not pass StructCodingPara* (e.g. DC_EnDeCoding.c). */
-static __thread StructCodingPara *_bpe_current_ctx = NULL;
+static BPE_TLS StructCodingPara *_bpe_current_ctx = NULL;
 
 void _bpe_set_ctx(StructCodingPara *ctx)
 {

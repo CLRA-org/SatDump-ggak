@@ -52,6 +52,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Cache vcpkg dependencies
+        uses: actions/cache@v4
+        with:
+          path: vcpkg
+          key: satdump-windows-x64-${{ hashFiles('windows/Configure-vcpkg.ps1') }}
+
       - name: Set up Python 3.13
         uses: actions/setup-python@v5
         with:
