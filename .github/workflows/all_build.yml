@@ -55,15 +55,6 @@ jobs:
         if: steps.win-deps-x64.outputs.cache-hit != 'true'
         run: rm -recurse -force $Env:GITHUB_WORKSPACE/vcpkg/packages, $Env:GITHUB_WORKSPACE/vcpkg/downloads, $Env:GITHUB_WORKSPACE/vcpkg/buildtrees
 
-      - name: Download Aaronia RTSA API
-        if: steps.win-deps-x64.outputs.cache-hit != 'true'
-        shell: powershell
-        run: Invoke-WebRequest -Uri "https://www.satdump.org/Aaronia_RTSA_Suite_PRO_2.2.0.12821_Setup_64bit.exe" -OutFile $Env:GITHUB_WORKSPACE/vcpkg/rtsa.exe
-
-      - name: Install Aaronia RTSA API
-        shell: cmd
-        run: start /wait vcpkg\rtsa.exe /q2 /install
-
       - name: Add support to NSIS for long PATHs
         shell: powershell
         run: ${{github.workspace}}\windows\Get-NSIS-LongStrings.ps1
@@ -87,7 +78,7 @@ jobs:
 
       - name: Configure CMake
         working-directory: ${{runner.workspace}}/build
-        run: cmake -DVCPKG_TARGET_TRIPLET="x64-windows" -DPLUGIN_AARONIA_SDR_SUPPORT=ON -DBUILD_MSVC=ON -DCMAKE_TOOLCHAIN_FILE="${{github.workspace}}\vcpkg\scripts\buildsystems\vcpkg.cmake" "$Env:[...]"
+        run: cmake -DVCPKG_TARGET_TRIPLET="x64-windows" -DBUILD_MSVC=ON -DCMAKE_TOOLCHAIN_FILE="${{github.workspace}}\vcpkg\scripts\buildsystems\vcpkg.cmake" "$Env:GITHUB_WORKSPACE"
 
       - name: Build
         working-directory: ${{runner.workspace}}/build
