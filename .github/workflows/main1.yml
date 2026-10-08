@@ -52,8 +52,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache vcpkg dependencies
-        uses: actions/cache@v4
+      - name: Restore vcpkg dependencies
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
         with:
           path: vcpkg
           key: satdump-windows-x64-${{ hashFiles('windows/Configure-vcpkg.ps1') }}
@@ -72,6 +73,13 @@ jobs:
       - name: Configure vcpkg with SDR dependencies
         shell: pwsh
         run: .\windows\Configure-vcpkg.ps1 -platform x64-windows
+
+      - name: Save vcpkg dependencies
+        if: always() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: vcpkg
+          key: satdump-windows-x64-${{ hashFiles('windows/Configure-vcpkg.ps1') }}
 
       - name: Configure CMake
         run: >
