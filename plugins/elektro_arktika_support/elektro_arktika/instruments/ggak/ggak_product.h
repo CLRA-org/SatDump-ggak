@@ -16,6 +16,13 @@
 #include <map>
 #include <vector>
 
+#if defined(_MSC_VER)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace elektro_arktika
 {
     namespace ggak
