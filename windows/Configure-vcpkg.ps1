@@ -340,14 +340,14 @@ rm -recurse -force libad9361-iio
 if($platform -eq "x64-windows" -or $platform -eq "x86-windows")
 {
     Write-Output "Building LimeSuite..."
-    Invoke-WebRequest -Uri "https://www.satdump.org/FX3-SDK.zip" -OutFile FX3-SDK.zip
-    Expand-Archive FX3-SDK.zip .
-    $fx3_arg = "-DFX3_SDK_PATH=$($(Get-Item .\FX3-SDK).FullName)"
-    git clone https://github.com/myriadrf/LimeSuite # v23.11.0 (latest as of this writing) is not compatible with the latest MSVC
+    $limesuite_tarball = Join-Path $env:TEMP "limesuite-23.11.0.tar.gz"
+    Invoke-WebRequest -Uri "https://github.com/myriadrf/LimeSuite/archive/refs/tags/v23.11.0.tar.gz" -OutFile $limesuite_tarball
+    tar -xzf $limesuite_tarball
+    Move-Item LimeSuite-23.11.0 LimeSuite
     cd LimeSuite
     $null = mkdir build-dir
     cd build-dir
-    cmake $build_args -DENABLE_GUI=OFF $fx3_arg ..
+    cmake $build_args -DENABLE_GUI=OFF -DCMAKE_POLICY_VERSION_MINIMUM="3.5" ..
     cmake --build . --config Release
     cmake --install .
     cd ..\..
@@ -368,12 +368,6 @@ cmake --install .
 cd ..\..\..
 rm -recurse -force bladeRF
 
-# Not compatible with ARM at this time
-if($platform -eq "x64-windows" -or $platform -eq "x86-windows")
-{
-    rm -recurse -force FX3-SDK, FX3-SDK.zip
-}
-
 Write-Output "Building UHD..."
 git clone https://github.com/EttusResearch/uhd # v4.8 (latest as of this writing) is not compatible with the latest MSVC
 cd uhd\host
@@ -387,17 +381,6 @@ rm -recurse -force uhd
 
 cd ..
 rm -recurse -force build
-
-#Install SDRPlay API
-Write-Output "Installing SDRPlay API..."
-Invoke-WebRequest -Uri "https://www.satdump.org/SDRPlay.zip" -OutFile sdrplay.zip
-mkdir sdrplay | Out-Null
-Expand-Archive sdrplay.zip .
-cp sdrplay\API\inc\*.h installed\$platform\include
-cp sdrplay\API\$sdrplay_arch\sdrplay_api.dll installed\$platform\bin
-cp sdrplay\API\$sdrplay_arch\sdrplay_api.lib installed\$platform\lib
-Remove-Item sdrplay -Force -Recurse -ErrorAction SilentlyContinue
-Remove-Item sdrplay.zip
 
 #Clean Up (Some packages are silly)
 Write-Output "Cleaning up..."
