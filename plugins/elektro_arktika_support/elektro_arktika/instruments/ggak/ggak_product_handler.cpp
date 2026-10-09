@@ -194,7 +194,7 @@ namespace elektro_arktika
             constexpr int MAG_FIELD_COUNT = 4;
             std::array<bool*, MAG_FIELD_COUNT> show_flags = {
                 &mag_show_btotal, &mag_show_bx, &mag_show_by, &mag_show_bz};
-            int mag_field_count = std::min(MAG_FIELD_COUNT, static_cast<int>(plot_mag_channels.size()));
+            int mag_field_count = (std::min)(MAG_FIELD_COUNT, static_cast<int>(plot_mag_channels.size()));
 
             int visible_count = 0;
             for (int i = 0; i < mag_field_count; i++)
@@ -297,7 +297,7 @@ namespace elektro_arktika
             else
             {
                 float min_plot_h = ImGui::GetTextLineHeight() * 12;
-                float plot_h = std::max(min_plot_h, win_size.y / visible);
+                float plot_h = (std::max)(min_plot_h, win_size.y / visible);
                 float total_h = plot_h * visible;
 
                 if (total_h > win_size.y)
@@ -339,7 +339,7 @@ namespace elektro_arktika
             }
 
             float min_plot_h = ImGui::GetTextLineHeight() * 12;
-            float plot_h = std::max(min_plot_h, win_size.y / n_channels);
+            float plot_h = (std::max)(min_plot_h, win_size.y / n_channels);
             float total_h = plot_h * n_channels;
 
             if (total_h > win_size.y)
@@ -409,7 +409,7 @@ namespace elektro_arktika
                         (ImVec4)style::theme.green, (ImVec4)style::theme.light_green,
                         (ImVec4)style::theme.yellow, (ImVec4)style::theme.orange,
                         (ImVec4)style::theme.red};
-                    int color_idx = std::max(0, std::min(level - 1, 4));
+                    int color_idx = (std::max)(0, (std::min)(level - 1, 4));
                     ImGui::Spacing();
                     ImGui::Text("Geomagnetic Activity:");
                     ImGui::SameLine();

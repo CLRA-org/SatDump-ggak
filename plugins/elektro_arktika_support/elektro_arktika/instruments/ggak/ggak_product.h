@@ -16,13 +16,6 @@
 #include <map>
 #include <vector>
 
-#if defined(_MSC_VER)
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#endif
-
 namespace elektro_arktika
 {
     namespace ggak
@@ -46,10 +39,10 @@ namespace elektro_arktika
 
             void updateMinMax()
             {
-                cached_min = std::numeric_limits<double>::max();
-                cached_max = -std::numeric_limits<double>::max();
+                cached_min = (std::numeric_limits<double>::max)();
+                cached_max = -(std::numeric_limits<double>::max)();
                 cached_valid_count = 0;
-                size_t n = std::min(timestamps.size(), values.size());
+                size_t n = (std::min)(timestamps.size(), values.size());
                 for (size_t i = 0; i < n; i++)
                 {
                     if (std::isnan(values[i]))
